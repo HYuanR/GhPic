@@ -4,7 +4,7 @@
  *
  * @package GhPic
  * @author  麦狗 <3037924279@qq.com>
- * @version 1.2.0
+ * @version 1.2.1
  * @link    https://mdog.cn/
  */
 
@@ -353,7 +353,7 @@ HTML;
 
         
         if (isset($out['files']['Plugin.php']['url']) && '' !== $out['files']['Plugin.php']['url']) {
-            $raw = self::fetchBinary($out['files']['Plugin.php']['url'], 15);
+            $raw = self::fetchBinary($out['files']['Plugin.php']['url'] . '?ghpic=' . time(), 15);
             if (is_string($raw) && preg_match('~@version\s+([0-9A-Za-z.\-]+)~', $raw, $m)) {
                 $out['version'] = $m[1];
             }
@@ -490,7 +490,7 @@ HTML;
         $html = '<div style="margin:6px 0 4px;font-size:13px;color:#57606a">'
             . '当前版本 <b style="color:#24292f">' . self::VERSION . '</b>　来源 ' . $src
             . '　分支 <code>' . htmlspecialchars($remote['branch'], ENT_QUOTES, 'UTF-8') . '</code>'
-            . ('' !== ($remote['version'] ?? '') && $remote['version'] !== self::VERSION
+            . ($count > 0 && '' !== ($remote['version'] ?? '') && $remote['version'] !== self::VERSION
                 ? '　远端 <b style="color:#d4a72c">' . htmlspecialchars($remote['version'], ENT_QUOTES, 'UTF-8') . '</b>'
                 : '')
             . ('' !== $remote['commit'] ? '　最近提交 ' . htmlspecialchars($remote['commit'], ENT_QUOTES, 'UTF-8') : '')
