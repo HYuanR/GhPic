@@ -20,7 +20,7 @@ try {
 }
 
 $ghpicReady = $ghpicOpt ? \TypechoPlugin\GhPic\Plugin::ready($ghpicOpt) : false;
-$ghpicToken = \Typecho\Common::hash('GhPic-panel');
+$ghpicToken = \TypechoPlugin\GhPic\Plugin::csrf('panel');
 $ghpicCdn   = $ghpicOpt ? \TypechoPlugin\GhPic\Plugin::cdnBase($ghpicOpt) : '';
 
 $ghpicRoot = realpath(__TYPECHO_ROOT_DIR__ . '/usr/uploads');
@@ -311,8 +311,8 @@ function ghpic_url(array $override = []): string
     <?php if ($result): ?>
         <ul style="margin:10px 0;padding:10px 12px;background:#f6f8fa;border-radius:4px;list-style:none;font-size:13px;">
             <?php foreach ($result as $r): ?>
-                <li style="color:<?php echo 'ok' === $r[0] ? '#1a7f37' : '#cf222e'; ?>;line-height:1.9;">
-                    <?php echo ('ok' === $r[0] ? '✔ ' : '✘ ') . $r[1]; ?>
+                <li style="color:<?php echo 'ok' === $r[0] ? '#24292f' : '#cf222e'; ?>;line-height:1.9;">
+                    <?php echo 'ok' === $r[0] ? $r[1] : '失败：' . $r[1]; ?>
                 </li>
             <?php endforeach; ?>
         </ul>

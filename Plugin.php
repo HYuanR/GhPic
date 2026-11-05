@@ -4,7 +4,7 @@
  *
  * @package GhPic
  * @author  麦狗 <3037924279@qq.com>
- * @version 1.2.1
+ * @version 1.2.4
  * @link    https://mdog.cn/
  */
 
@@ -391,7 +391,7 @@ HTML;
             $local = self::pluginDir() . '/' . $name;
 
             if (is_file($local) && self::blobSha((string) file_get_contents($local)) === $info['sha']) {
-                $lines[] = ['ok', $name . '：已是最新'];
+                $lines[] = ['ok', $name . '：无需更新'];
                 continue;
             }
 
@@ -421,13 +421,13 @@ HTML;
             $lines[] = ['ok', $name . '：已更新（旧文件存为 ' . $name . '.bak）'];
         }
 
-        $html = '';
+        $out = [];
         foreach ($lines as $l) {
-            $html .= '<li style="color:' . ('ok' === $l[0] ? '#1a7f37' : '#cf222e') . '">'
-                . ('ok' === $l[0] ? '✔ ' : '✘ ') . htmlspecialchars($l[1], ENT_QUOTES, 'UTF-8') . '</li>';
+            $text = htmlspecialchars($l[1], ENT_QUOTES, 'UTF-8');
+            $out[] = 'ok' === $l[0] ? $text : '<span style="color:#cf222e">' . $text . '</span>';
         }
 
-        return '<ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.9">' . $html . '</ul>';
+        return '<div style="margin:8px 0 0;font-size:13px;line-height:1.9">' . implode('<br>', $out) . '</div>';
     }
 
     private static function noticeHtml(string $type, string $text): string
@@ -441,17 +441,19 @@ HTML;
     
     private static function updatePanel(): string
     {
-        $token  = \Typecho\Common::hash('GhPic-update');
+        $token  = self::csrf('update');
         $remote = self::remoteFiles();
         $result = '';
 
-        if ('POST' === strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET') && isset($_POST['ghpic_update'])) {
-            $sent = (string) ($_POST['_ghpic'] ?? '');
+        if ('update' === (string) ($_GET['ghpic'] ?? '')) {
+            $sent = (string) ($_GET['_'] ?? '');
             if (!hash_equals($token, $sent)) {
                 $result = self::noticeHtml('err', '安全令牌校验失败，请刷新页面重试。');
             } else {
                 $result = self::doUpdate();
                 $remote = self::remoteFiles();
+                $result = '<p style="margin:0 0 12px;font-size:13px;">'
+                    . '更新完成，刷新页面就能看到新的版本号。' . $result . '</p>';
             }
         }
 
@@ -508,19 +510,24 @@ HTML;
             . '<th style="padding:7px 10px">状态</th></tr></thead><tbody>'
             . $rows . '</tbody></table>';
 
-        $html .= '<form method="post" action="" style="margin:12px 0 0">'
-            . '<input type="hidden" name="_ghpic" value="' . htmlspecialchars($token, ENT_QUOTES, 'UTF-8') . '">'
-            . '<button type="submit" name="ghpic_update" value="1" class="btn primary"'
-            . ($count > 0 ? '' : ' disabled') . '>'
-            . ('' !== $remote['error'] ? '无法连接仓库' : ($count > 0 ? '更新到最新版' : '已是最新版本'))
-            . '</button>'
-            . '<span style="margin-left:10px;color:#8b949e;font-size:12px">'
+        $updateUrl = Helper::options()->adminUrl . 'options-plugin.php?config=GhPic&tab=5&ghpic=update&_='
+            . rawurlencode($token);
+
+        $html .= '<div style="margin:12px 0 0">';
+        if ('update' !== (string) ($_GET['ghpic'] ?? '')) {
+            $html .= $count > 0
+                ? '<a href="' . htmlspecialchars($updateUrl, ENT_QUOTES, 'UTF-8') . '" class="btn primary"'
+                  . ' style="display:inline-block;padding:6px 16px;text-decoration:none;">更新到最新版</a>'
+                : '<span class="btn" style="display:inline-block;padding:6px 16px;opacity:.55;">'
+                  . ('' !== $remote['error'] ? '无法连接仓库' : '已是最新版本') . '</span>';
+        }
+        $html .= '<span style="margin-left:10px;color:#8b949e;font-size:12px">'
             . '更新会覆盖 Plugin.php / Img.php / panel.php，旧文件自动存为 .bak；'
             . '更新后建议禁用再启用一次插件</span>'
             . '<p style="margin:10px 0 0;font-size:12px;color:#8b949e">'
             . '遇到问题或想提建议，请到 <a href="https://mdog.cn/archives/11/" target="_blank" rel="noopener">'
             . 'mdog.cn/archives/11</a> 文章下方留言</p>'
-            . '</form>';
+            . '</div>';
 
         return '<div class="ghpic-update">' . $html . '</div>';
     }
@@ -956,6 +963,17 @@ HTML;
         }
 
         return implode(',', $out);
+    }
+
+    public static function csrf(string $scope): string
+    {
+        $secret = '';
+        try {
+            $secret = (string) Helper::options()->secret;
+        } catch (\Throwable $e) {
+        }
+
+        return substr(sha1($secret . '|ghpic|' . $scope), 0, 32);
     }
 
     public static function refererAllowed($opt): bool

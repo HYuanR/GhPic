@@ -2,7 +2,7 @@
 
 > 传图自动进 GitHub，CDN 加速访问，零成本不占主机空间。
 
-![版本](https://img.shields.io/badge/版本-1.2.0-blue)
+![版本](https://img.shields.io/badge/版本-1.2.3-blue)
 ![Typecho](https://img.shields.io/badge/Typecho-1.2%20%2F%201.3-555)
 ![PHP](https://img.shields.io/badge/PHP-7.4%2B-777bb4)
 ![协议](https://img.shields.io/badge/协议-MIT-green)
