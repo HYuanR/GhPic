@@ -4,7 +4,7 @@
  *
  * @package GhPic
  * @author  麦狗 <3037924279@qq.com>
- * @version 3.8.0
+ * @version 1.2.0
  * @link    https://mdog.cn/
  */
 
@@ -20,18 +20,21 @@ use Utils\Helper;
 
 class Plugin implements PluginInterface
 {
-    const VERSION = '3.8.0';
+    const VERSION = '1.2.0';
+
+    
+    const UPDATE_REPO = 'HYuanR/GhPic';
     const API     = 'https://api.github.com';
 
-    /** API 基地址，便于自测时替换 */
+    
     public static $api = self::API;
 
-    /** 允许接管的图片扩展名 */
+    
     private static $allow = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'ico'];
 
-    /* ================================================================== */
-    /*  生命周期                                                           */
-    /* ================================================================== */
+    
+    
+    
 
     public static function activate()
     {
@@ -45,7 +48,7 @@ class Plugin implements PluginInterface
 
         Helper::addRoute('ghpic-img', '/ghpicimg', 'TypechoPlugin\GhPic\Img', 'render');
 
-        /* 标签表：失败不影响启用，面板会提示 */
+        
         try {
             $prefix = \Typecho\Db::get()->getPrefix();
             \Typecho\Db::get()->query(
@@ -58,13 +61,11 @@ class Plugin implements PluginInterface
         } catch (\Throwable $e) {
         }
 
-        /* 此刻 Typecho 还没写入默认设置，不能调用 plugin()，否则抛异常会导致启用失败 */
+        
         return _t('GhPic 已启用。请到设置中填写仓库地址与 Access Token，保存时自动校验连接。');
     }
 
-    /**
-     * 保存设置时的校验回调（1.3 特性：返回值直接显示在后台提示中）
-     */
+    
     public static function configCheck(array $settings)
     {
         $token = trim((string) ($settings['token'] ?? ''));
@@ -77,9 +78,7 @@ class Plugin implements PluginInterface
         return ' ' . self::selfCheck(new \Typecho\Config($settings));
     }
 
-    /**
-     * 安全读取插件设置：未启用或尚未保存过设置时返回 null，而不是抛异常
-     */
+    
     private static function settings()
     {
         $backup = self::backup();
@@ -94,16 +93,13 @@ class Plugin implements PluginInterface
         }
     }
 
-    /** 供面板/测试读取当前配置 */
+    
     public static function currentConfig()
     {
         return self::settings();
     }
 
-    /**
-     * 自定义保存：Typecho 禁用插件时会删掉 plugin:GhPic 这一行，
-     * 这里额外写一份 ghpic_config，重新启用时回填，避免丢配置。
-     */
+    
     public static function configHandle(array $settings, bool $isInit)
     {
         $saved = self::backup();
@@ -117,7 +113,7 @@ class Plugin implements PluginInterface
         self::saveBackup($settings);
     }
 
-    /** 读取备份配置（直接查库，避开 Options 缓存） */
+    
     private static function backup(): array
     {
         try {
@@ -138,7 +134,7 @@ class Plugin implements PluginInterface
         return [];
     }
 
-    /** 写入备份配置 */
+    
     private static function saveBackup(array $settings): void
     {
         try {
@@ -159,7 +155,7 @@ class Plugin implements PluginInterface
         }
     }
 
-    /** 写回 Typecho 原生 plugin:GhPic 行，配置页靠它回显 */
+    
     private static function seedPluginOption(array $settings): void
     {
         try {
@@ -178,16 +174,14 @@ class Plugin implements PluginInterface
         return _t('GhPic 已禁用，图片与文章不受影响。');
     }
 
-    /** 后台左侧菜单入口 */
+    
     public static function navBar()
     {
         echo '<li><a href="' . Helper::options()->adminUrl . 'extending.php?panel=GhPic/panel.php">'
             . _t('图床迁移') . '</a></li>';
     }
 
-    /**
-     * 前台页脚注入：CDN 图片加载失败 / 超时自动回源到本站代理
-     */
+    
     public static function footer()
     {
         $opt = self::settings();
@@ -267,9 +261,9 @@ class Plugin implements PluginInterface
 HTML;
     }
 
-    /* ================================================================== */
-    /*  配置                                                               */
-    /* ================================================================== */
+    
+    
+    
 
     public static function config(Form $form)
     {
@@ -282,7 +276,7 @@ HTML;
 
         foreach ($groups as $index => $group) {
             if ($index !== $tab) {
-                /* 非当前分组用隐藏域保底，保证保存时不会丢字段 */
+                
                 foreach ($group['fields'] as $name => $def) {
                     $hidden = new Hidden($name, null, $saved[$name] ?? ($def['default'] ?? ''));
                     $hidden->setAttribute('style', 'display:none');
@@ -298,9 +292,240 @@ HTML;
                 $form->addInput(self::buildField($name, $def));
             }
         }
+
+        if (5 === (int) $tab) {
+            echo self::updatePanel();
+        }
     }
 
-    /** 19 个字段的分组定义 */
+    
+    
+    
+
+    private static array $remoteCache = [];
+
+    private static function updateFiles(): array
+    {
+        return ['Plugin.php', 'Img.php', 'panel.php'];
+    }
+
+    private static function pluginDir(): string
+    {
+        return __TYPECHO_ROOT_DIR__ . '/usr/plugins/GhPic';
+    }
+
+    
+    private static function remoteFiles(): array
+    {
+        if (self::$remoteCache) {
+            return self::$remoteCache;
+        }
+
+        $out    = ['files' => [], 'branch' => 'main', 'commit' => '', 'version' => '', 'error' => ''];
+        $opt    = self::settings();
+        $apiUrl = self::$api . '/repos/' . self::UPDATE_REPO;
+
+        $repo = self::request('GET', $apiUrl, null, $opt);
+        if ($repo['ok'] && isset($repo['data']['default_branch'])) {
+            $out['branch'] = (string) $repo['data']['default_branch'];
+        }
+
+        $list = self::request('GET', $apiUrl . '/contents/?ref=' . rawurlencode($out['branch']), null, $opt);
+        if (!$list['ok'] || !is_array($list['data'])) {
+            $out['error'] = '无法读取仓库（HTTP ' . (int) $list['code'] . '）';
+            return self::$remoteCache = $out;
+        }
+
+        foreach ($list['data'] as $item) {
+            if (('file' === ($item['type'] ?? '')) && in_array($item['name'], self::updateFiles(), true)) {
+                $out['files'][$item['name']] = [
+                    'sha'  => (string) ($item['sha'] ?? ''),
+                    'size' => (int) ($item['size'] ?? 0),
+                    'url'  => (string) ($item['download_url'] ?? ''),
+                ];
+            }
+        }
+
+        $commits = self::request('GET', $apiUrl . '/commits?per_page=1', null, $opt);
+        if ($commits['ok'] && isset($commits['data'][0]['commit']['committer']['date'])) {
+            $out['commit'] = (string) $commits['data'][0]['commit']['committer']['date'];
+        }
+
+        
+        if (isset($out['files']['Plugin.php']['url']) && '' !== $out['files']['Plugin.php']['url']) {
+            $raw = self::fetchBinary($out['files']['Plugin.php']['url'], 15);
+            if (is_string($raw) && preg_match('~@version\s+([0-9A-Za-z.\-]+)~', $raw, $m)) {
+                $out['version'] = $m[1];
+            }
+        }
+
+        return self::$remoteCache = $out;
+    }
+
+    private static function localSha(string $file): string
+    {
+        $path = self::pluginDir() . '/' . $file;
+        if (!is_file($path)) {
+            return '';
+        }
+
+        return self::blobSha((string) file_get_contents($path));
+    }
+
+    
+    private static function doUpdate(): string
+    {
+        $remote = self::remoteFiles();
+        if ('' !== $remote['error']) {
+            return self::noticeHtml('err', $remote['error']);
+        }
+
+        $lines = [];
+        foreach (self::updateFiles() as $name) {
+            if (!isset($remote['files'][$name])) {
+                $lines[] = ['err', $name . '：远端不存在'];
+                continue;
+            }
+
+            $info  = $remote['files'][$name];
+            $local = self::pluginDir() . '/' . $name;
+
+            if (is_file($local) && self::blobSha((string) file_get_contents($local)) === $info['sha']) {
+                $lines[] = ['ok', $name . '：已是最新'];
+                continue;
+            }
+
+            if ('' === $info['url']) {
+                $lines[] = ['err', $name . '：缺少下载地址'];
+                continue;
+            }
+
+            $data = self::fetchBinary($info['url'], 20);
+            if (null === $data || '' === $data) {
+                $lines[] = ['err', $name . '：下载失败'];
+                continue;
+            }
+            if ('.php' === substr($name, -4) && 0 !== strpos($data, '<?php')) {
+                $lines[] = ['err', $name . '：内容异常，已跳过'];
+                continue;
+            }
+
+            if (is_file($local)) {
+                @copy($local, $local . '.bak');
+            }
+            if (false === @file_put_contents($local, $data)) {
+                $lines[] = ['err', $name . '：写入失败（目录不可写）'];
+                continue;
+            }
+
+            $lines[] = ['ok', $name . '：已更新（旧文件存为 ' . $name . '.bak）'];
+        }
+
+        $html = '';
+        foreach ($lines as $l) {
+            $html .= '<li style="color:' . ('ok' === $l[0] ? '#1a7f37' : '#cf222e') . '">'
+                . ('ok' === $l[0] ? '✔ ' : '✘ ') . htmlspecialchars($l[1], ENT_QUOTES, 'UTF-8') . '</li>';
+        }
+
+        return '<ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.9">' . $html . '</ul>';
+    }
+
+    private static function noticeHtml(string $type, string $text): string
+    {
+        $color = 'err' === $type ? '#cf222e' : '#1a7f37';
+
+        return '<p style="color:' . $color . ';font-size:13px;margin:0 0 10px">'
+            . htmlspecialchars($text, ENT_QUOTES, 'UTF-8') . '</p>';
+    }
+
+    
+    private static function updatePanel(): string
+    {
+        $token  = \Typecho\Common::hash('GhPic-update');
+        $remote = self::remoteFiles();
+        $result = '';
+
+        if ('POST' === strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET') && isset($_POST['ghpic_update'])) {
+            $sent = (string) ($_POST['_ghpic'] ?? '');
+            if (!hash_equals($token, $sent)) {
+                $result = self::noticeHtml('err', '安全令牌校验失败，请刷新页面重试。');
+            } else {
+                $result = self::doUpdate();
+                $remote = self::remoteFiles();
+            }
+        }
+
+        $rows  = '';
+        $count = 0;
+
+        foreach (self::updateFiles() as $name) {
+            $localSha = self::localSha($name);
+            $remoteSha = $remote['files'][$name]['sha'] ?? '';
+            $size      = isset($remote['files'][$name]['size']) ? round($remote['files'][$name]['size'] / 1024, 1) . ' KB' : '—';
+
+            if ('' === $localSha) {
+                $state = '<span style="color:#cf222e">本地缺失</span>';
+                $count++;
+            } elseif ('' === $remoteSha) {
+                $state = '<span style="color:#8b949e">远端不可用</span>';
+            } elseif ($localSha === $remoteSha) {
+                $state = '<span style="color:#1a7f37">已是最新</span>';
+            } else {
+                $state = '<span style="color:#d4a72c">有新版本</span>';
+                $count++;
+            }
+
+            $rows .= '<tr style="border-top:1px solid #eaeef2">'
+                . '<td style="padding:7px 10px"><code>' . $name . '</code></td>'
+                . '<td style="padding:7px 10px;color:#8b949e">' . ('' === $localSha ? '—' : substr($localSha, 0, 8)) . '</td>'
+                . '<td style="padding:7px 10px;color:#8b949e">' . ('' === $remoteSha ? '—' : substr($remoteSha, 0, 8)) . '</td>'
+                . '<td style="padding:7px 10px">' . $size . '</td>'
+                . '<td style="padding:7px 10px">' . $state . '</td>'
+                . '</tr>';
+        }
+
+        $src = '<a href="https://github.com/' . self::UPDATE_REPO . '" target="_blank" rel="noopener">'
+            . self::UPDATE_REPO . '</a>';
+
+        $html = '<div style="margin:6px 0 4px;font-size:13px;color:#57606a">'
+            . '当前版本 <b style="color:#24292f">' . self::VERSION . '</b>　来源 ' . $src
+            . '　分支 <code>' . htmlspecialchars($remote['branch'], ENT_QUOTES, 'UTF-8') . '</code>'
+            . ('' !== ($remote['version'] ?? '') && $remote['version'] !== self::VERSION
+                ? '　远端 <b style="color:#d4a72c">' . htmlspecialchars($remote['version'], ENT_QUOTES, 'UTF-8') . '</b>'
+                : '')
+            . ('' !== $remote['commit'] ? '　最近提交 ' . htmlspecialchars($remote['commit'], ENT_QUOTES, 'UTF-8') : '')
+            . '</div>';
+
+        if ('' !== $remote['error']) {
+            $html .= self::noticeHtml('err', $remote['error'] . '，请检查主机能否访问 api.github.com');
+        }
+
+        $html .= $result;
+        $html .= '<table style="width:100%;max-width:640px;border-collapse:collapse;font-size:13px;margin:10px 0">'
+            . '<thead><tr style="background:#f6f8fa;text-align:left">'
+            . '<th style="padding:7px 10px">文件</th><th style="padding:7px 10px">本地</th>'
+            . '<th style="padding:7px 10px">远端</th><th style="padding:7px 10px">大小</th>'
+            . '<th style="padding:7px 10px">状态</th></tr></thead><tbody>'
+            . $rows . '</tbody></table>';
+
+        $html .= '<form method="post" action="" style="margin:12px 0 0">'
+            . '<input type="hidden" name="_ghpic" value="' . htmlspecialchars($token, ENT_QUOTES, 'UTF-8') . '">'
+            . '<button type="submit" name="ghpic_update" value="1" class="btn primary"'
+            . ($count > 0 ? '' : ' disabled') . '>'
+            . ('' !== $remote['error'] ? '无法连接仓库' : ($count > 0 ? '更新到最新版' : '已是最新版本'))
+            . '</button>'
+            . '<span style="margin-left:10px;color:#8b949e;font-size:12px">'
+            . '更新会覆盖 Plugin.php / Img.php / panel.php，旧文件自动存为 .bak；'
+            . '更新后建议禁用再启用一次插件</span>'
+            . '<p style="margin:10px 0 0;font-size:12px;color:#8b949e">'
+            . '遇到问题或想提建议，请到 <a href="https://mdog.cn/archives/11/" target="_blank" rel="noopener">'
+            . 'mdog.cn/archives/11</a> 文章下方留言</p>'
+            . '</form>';
+
+        return '<div class="ghpic-update">' . $html . '</div>';
+    }
+
+    
     private static function fieldGroups(): array
     {
         $ghNew   = '<a href="https://github.com/new" target="_blank" rel="noopener">github.com/new</a>';
@@ -418,12 +643,25 @@ HTML;
                         'type' => 'text', 'label' => '兜底缓存天数', 'default' => '7',
                         'desc' => '代理取回的图片在本地缓存几天，<code>0</code> 表示不缓存',
                     ],
+                    'rate_limit' => [
+                        'type' => 'text', 'label' => '单 IP 每分钟上限', 'default' => '120',
+                        'desc' => '防止代理被刷，<code>0</code> 表示不限速；正常读者一分钟远到不了 120 次',
+                    ],
+                    'referer_white' => [
+                        'type' => 'textarea', 'label' => '防盗链白名单', 'default' => '',
+                        'desc' => '允许引用图片的域名，逗号分隔，如 <code>mdog.cn,www.mdog.cn</code>；'
+                            . '留空表示不校验（推荐先留空，被刷了再填）',
+                    ],
                 ],
+            ],
+            [
+                'title' => '插件更新',
+                'fields' => [],
             ],
         ];
     }
 
-    /** 分段按钮（链接形式，无 JS） */
+    
     private static function tabBar(int $active): string
     {
         $base = Helper::options()->adminUrl . 'options-plugin.php?config=GhPic';
@@ -446,7 +684,7 @@ HTML;
         return $html;
     }
 
-    /** 按定义生成表单元素 */
+    
     private static function buildField(string $name, array $def)
     {
         $label = _t($def['label'] ?? $name);
@@ -467,9 +705,9 @@ HTML;
     {
     }
 
-    /* ================================================================== */
-    /*  上传                                                               */
-    /* ================================================================== */
+    
+    
+    
 
     public static function uploadHandle(array $file)
     {
@@ -489,7 +727,7 @@ HTML;
 
         $maxMb = max(1, (int) ($opt->max_size ?? 10));
         if ((int) $file['size'] > $maxMb * 1024 * 1024) {
-            return false; // 超限回退本地存储，保证文件不丢
+            return false; 
         }
 
         $data = @file_get_contents($file['tmp_name']);
@@ -501,7 +739,7 @@ HTML;
 
         $res = self::pushUnique($opt, $data, $ext, (string) $file['name'], 'upload');
         if (!$res['ok']) {
-            return false; // 推送失败回退本地存储
+            return false; 
         }
         $remote = $res['remote'];
 
@@ -520,9 +758,9 @@ HTML;
         ];
     }
 
-    /* ================================================================== */
-    /*  附件地址（修复 Typecho 1.3 会强行拼接 siteUrl 的问题）                 */
-    /* ================================================================== */
+    
+    
+    
 
     public static function attachmentHandle($attachment): string
     {
@@ -547,7 +785,7 @@ HTML;
         return (string) @file_get_contents(\Typecho\Common::url($path, __TYPECHO_ROOT_DIR__));
     }
 
-    /** 拉取远端二进制 */
+    
     public static function fetchBinary(string $url, int $timeout)
     {
         if (!function_exists('curl_init')) {
@@ -573,9 +811,9 @@ HTML;
         return (200 === $code && is_string($body) && '' !== $body) ? $body : null;
     }
 
-    /* ================================================================== */
-    /*  正文改写                                                           */
-    /* ================================================================== */
+    
+    
+    
 
     public static function contentEx($content, $widget = null)
     {
@@ -598,7 +836,7 @@ HTML;
             return $content;
         }
 
-        /* 修复历史遗留的坏地址：https://site/https:/cdn... → https://cdn... */
+        
         $content = self::repairUrl($content);
 
         if ('0' === (string) ($opt->rewrite ?? '1')) {
@@ -618,7 +856,7 @@ HTML;
         return str_replace(self::urlVariants($local), $cdn, $content);
     }
 
-    /** 修复被 Common::url 二次拼接的图片地址 */
+    
     public static function repairUrl(string $content): string
     {
         $site = rtrim(Helper::options()->siteUrl, '/');
@@ -631,9 +869,9 @@ HTML;
         return preg_replace($pattern, '$1://', $content);
     }
 
-    /* ================================================================== */
-    /*  公共工具                                                           */
-    /* ================================================================== */
+    
+    
+    
 
     public static function ready($opt)
     {
@@ -645,7 +883,7 @@ HTML;
         return '' !== $owner && '' !== $repo;
     }
 
-    /** 解析仓库地址，返回 [owner, repo] */
+    
     public static function repoOf($opt)
     {
         $raw = trim((string) ($opt->repo_url ?? ''));
@@ -660,7 +898,7 @@ HTML;
         return ['', ''];
     }
 
-    /** 读取全部标签，返回 [path => 'a,b'] */
+    
     public static function allTags(): array
     {
         $map = [];
@@ -679,7 +917,7 @@ HTML;
         return $map;
     }
 
-    /** 覆盖写入某张图片的标签 */
+    
     public static function saveTags(string $path, string $tags): bool
     {
         $db  = \Typecho\Db::get();
@@ -702,7 +940,7 @@ HTML;
         }
     }
 
-    /** 规范化标签串：去空、去重、限长 */
+    
     public static function normalizeTags(string $raw): string
     {
         $parts = preg_split('~[,，\s]+~u', $raw);
@@ -720,7 +958,129 @@ HTML;
         return implode(',', $out);
     }
 
-    /** 代理路径白名单：只允许仓库内的图片相对路径 */
+    public static function refererAllowed($opt): bool
+    {
+        $white = trim((string) ($opt->referer_white ?? ''));
+        if ('' === $white) {
+            return true;
+        }
+
+        $ref = (string) ($_SERVER['HTTP_REFERER'] ?? '');
+        if ('' === $ref) {
+            return true;
+        }
+
+        $host = strtolower((string) parse_url($ref, PHP_URL_HOST));
+        if ('' === $host) {
+            return true;
+        }
+
+        foreach (preg_split('~[\s,，]+~u', $white) as $item) {
+            $item = strtolower(trim((string) $item));
+            $item = preg_replace('~^https?://~', '', $item);
+            $item = rtrim($item, '/');
+            if ('' === $item) {
+                continue;
+            }
+            if ($host === $item || substr($host, -strlen('.' . $item)) === '.' . $item) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static function rateAllowed($opt): bool
+    {
+        $limit = (int) ($opt->rate_limit ?? 120);
+        if ($limit <= 0) {
+            return true;
+        }
+
+        $ip = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
+        if ('' === $ip) {
+            return true;
+        }
+
+        $dir = __TYPECHO_ROOT_DIR__ . '/usr/uploads/.ghpic-cache';
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0755, true);
+        }
+        if (!is_dir($dir)) {
+            return true;
+        }
+
+        if (1 === mt_rand(1, 40)) {
+            foreach ((array) glob($dir . '/rate-*') as $old) {
+                if (@filemtime($old) < time() - 300) {
+                    @unlink($old);
+                }
+            }
+        }
+
+        $file = $dir . '/rate-' . date('YmdHi') . '-' . md5($ip);
+        $used = (int) @file_get_contents($file);
+        if ($used >= $limit) {
+            return false;
+        }
+
+        @file_put_contents($file, (string) ($used + 1), LOCK_EX);
+
+        return true;
+    }
+
+    public static function deleteRemote($opt, string $path): array
+    {
+        [$owner, $repo] = self::repoOf($opt);
+        if ('' === $owner || '' === $repo) {
+            return ['ok' => false, 'code' => 0];
+        }
+
+        $branch = trim((string) ($opt->branch ?? 'main')) ?: 'main';
+        $api = self::$api . '/repos/' . rawurlencode($owner) . '/' . rawurlencode($repo)
+            . '/contents/' . implode('/', array_map('rawurlencode', explode('/', $path)));
+
+        $get = self::request('GET', $api . '?ref=' . rawurlencode($branch), null, $opt);
+        if (!$get['ok'] || empty($get['data']['sha'])) {
+            return ['ok' => false, 'code' => (int) $get['code']];
+        }
+
+        $payload = json_encode([
+            'message' => 'delete ' . basename($path),
+            'sha' => (string) $get['data']['sha'],
+            'branch' => $branch,
+        ], JSON_UNESCAPED_SLASHES);
+
+        return self::request('DELETE', $api, $payload, $opt);
+    }
+
+    public static function remoteTree($opt): array
+    {
+        [$owner, $repo] = self::repoOf($opt);
+        if ('' === $owner || '' === $repo) {
+            return [];
+        }
+
+        $branch = trim((string) ($opt->branch ?? 'main')) ?: 'main';
+        $api = self::$api . '/repos/' . rawurlencode($owner) . '/' . rawurlencode($repo)
+            . '/git/trees/' . rawurlencode($branch) . '?recursive=1';
+
+        $res = self::request('GET', $api, null, $opt);
+        if (!$res['ok'] || empty($res['data']['tree'])) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($res['data']['tree'] as $node) {
+            if (($node['type'] ?? '') === 'blob') {
+                $out[(string) $node['path']] = (string) $node['sha'];
+            }
+        }
+
+        return $out;
+    }
+
+    
     public static function validPath(string $path): bool
     {
         if ('' === $path || strlen($path) > 300) {
@@ -755,7 +1115,7 @@ HTML;
         return rtrim($local, '/');
     }
 
-    /** 同一地址的三种写法，兼容 http / https / 协议相对 */
+    
     public static function urlVariants($url)
     {
         return array_unique([
@@ -802,9 +1162,9 @@ HTML;
         return $map[$ext] ?? ($fallback ?: 'application/octet-stream');
     }
 
-    /* ================================================================== */
-    /*  图片处理：WebP 优先，逐级降级                                        */
-    /* ================================================================== */
+    
+    
+    
 
     public static function webpReady(): bool
     {
@@ -818,16 +1178,14 @@ HTML;
         return true;
     }
 
-    /**
-     * @return array [二进制内容, 扩展名]
-     */
+    
     public static function optimize(string $data, string $ext, $opt): array
     {
         if ('off' === ($opt->optimize ?? 'auto')) {
             return [$data, $ext];
         }
 
-        /* 动图、矢量、图标一律不动 */
+        
         if (in_array($ext, ['gif', 'svg', 'ico'], true)) {
             return [$data, $ext];
         }
@@ -886,13 +1244,11 @@ HTML;
         return [$out, $new];
     }
 
-    /* ================================================================== */
-    /*  GitHub API                                                         */
-    /* ================================================================== */
+    
+    
+    
 
-    /**
-     * @return array ['ok' => bool, 'code' => int, 'data' => array|null]
-     */
+    
     public static function push($opt, string $remote, string $data, string $message): array
     {
         [$owner, $repo] = self::repoOf($opt);
@@ -914,8 +1270,7 @@ HTML;
             return $res;
         }
 
-        /* GitHub 对已存在的文件返回 422，需要带 sha 覆盖。
-           若已有文件内容与本次完全一致（git blob sha 相同），直接视为成功复用。 */
+        
         if (422 === (int) $res['code']) {
             $get = self::request(
                 'GET',
@@ -932,23 +1287,19 @@ HTML;
         return $res;
     }
 
-    /** git blob sha，用于判断远端同名文件内容是否与本地一致 */
+    
     public static function blobSha(string $data): string
     {
         return sha1('blob ' . strlen($data) . "\0" . $data);
     }
 
-    /**
-     * 推送并按需换名重试
-     *
-     * @return array ['ok' => bool, 'code' => int, 'remote' => string]
-     */
+    
     public static function pushUnique($opt, string $data, string $ext, string $origName, string $label): array
     {
         $remote = self::remotePath($opt, $data, $ext, $origName);
         $res    = self::push($opt, $remote, $data, $label . ' ' . basename($remote));
 
-        /* 命中 422 且内容不同 → 换一个名字重试一次 */
+        
         if (!$res['ok'] && 422 === (int) $res['code']) {
             $remote = self::remotePath(
                 $opt,
@@ -966,11 +1317,13 @@ HTML;
     {
         $token = trim((string) ($opt->token ?? ''));
         $head  = [
-            'Authorization: token ' . $token,
             'Accept: application/vnd.github+json',
             'Content-Type: application/json',
             'User-Agent: GhPic-Typecho/' . self::VERSION,
         ];
+        if ('' !== $token) {
+            $head[] = 'Authorization: token ' . $token;
+        }
 
         $err = '';
         if (function_exists('curl_init')) {
@@ -1013,7 +1366,7 @@ HTML;
         ];
     }
 
-    /** 连接自检，返回一句人话 */
+    
     private static function selfCheck($opt): string
     {
         if (!self::ready($opt)) {
@@ -1046,7 +1399,7 @@ HTML;
         return _t(' 已连接账号 ') . $login . '，仓库 ' . $owner . '/' . $repo . ' 正常。' . $warn;
     }
 
-    /** 把 HTTP 结果翻译成人话 */
+    
     private static function explain(array $res, string $prefix): string
     {
         $code = (int) $res['code'];

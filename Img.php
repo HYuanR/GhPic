@@ -1,11 +1,6 @@
 <?php
 /**
- * GhPic — 图片兜底代理
- *
- * 当前端判定 CDN 图片超时或加载失败时，把请求转到这个地址，
- * 由服务端回源（先 CDN，再 GitHub raw）取图并输出，本地带缓存。
- *
- * 访问方式：/ghpicimg?p=uploads/2026/11/xxx.webp
+ * GhPic 图片兜底代理
  *
  * @package GhPic
  */
@@ -16,38 +11,32 @@ use Utils\Helper;
 
 class Img extends \Typecho\Widget
 {
-    /** 默认缓存有效期（秒），实际以配置项 cache_ttl 为准 */
-    const CACHE_TTL = 604800;
-
     public function execute()
     {
     }
 
     public function render()
     {
-        $opt = null;
-        try {
-            $opt = Helper::options()->plugin('GhPic');
-        } catch (\Throwable $e) {
-        }
+        $opt = Plugin::currentConfig();
         if (!$opt) {
-            $this->fail(404, 'GhPic not configured');
+            $this->fail(404, 'not configured');
         }
 
-        $path = (string) $this->request->get('p');
-        $path = ltrim(str_replace('\\', '/', $path), '/');
-
+        $path = ltrim(str_replace('\\', '/', (string) $this->request->get('p')), '/');
         if (!Plugin::validPath($path)) {
             $this->fail(400, 'bad path');
+        }
+        if (!Plugin::refererAllowed($opt)) {
+            $this->fail(403, 'referer not allowed');
+        }
+        if (!Plugin::rateAllowed($opt)) {
+            $this->fail(429, 'too many requests');
         }
 
         $ext  = strtolower(pathinfo($path, PATHINFO_EXTENSION));
         $mime = Plugin::mime($ext);
+        $ttl  = max(3600, ((int) ($opt->cache_ttl ?? 7)) * 86400);
 
-        /* 缓存时长：配置按天，最小 1 小时 */
-        $ttl = max(3600, ((int) ($opt->cache_ttl ?? 7)) * 86400);
-
-        /* 1. 本地缓存 */
         $cacheDir  = __TYPECHO_ROOT_DIR__ . '/usr/uploads/.ghpic-cache';
         $cacheFile = $cacheDir . '/' . md5($path) . '.' . $ext;
 
@@ -62,7 +51,6 @@ class Img extends \Typecho\Widget
             }
         }
 
-        /* 2. 回源：CDN → GitHub raw */
         $sources = [Plugin::cdnBase($opt) . '/' . $path];
 
         [$owner, $repo] = Plugin::repoOf($opt);
@@ -76,8 +64,8 @@ class Img extends \Typecho\Widget
             if ('' === trim($url, '/')) {
                 continue;
             }
-            $data = $this->fetch($url, 8);
-            if (null === $data) {
+            $data = Plugin::fetchBinary($url, 8);
+            if (null === $data || '' === $data) {
                 continue;
             }
             if (!$this->looksLikeImage($data, $ext)) {
@@ -92,43 +80,6 @@ class Img extends \Typecho\Widget
         $this->fail(404, 'upstream unavailable');
     }
 
-    /** 请求远端，成功返回二进制，失败返回 null */
-    private function fetch(string $url, int $timeout)
-    {
-        if (function_exists('curl_init')) {
-            $ch = curl_init($url);
-            curl_setopt_array($ch, [
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_FOLLOWLOCATION => true,
-                CURLOPT_MAXREDIRS      => 3,
-                CURLOPT_TIMEOUT        => $timeout,
-                CURLOPT_CONNECTTIMEOUT => min(5, $timeout),
-                CURLOPT_USERAGENT      => 'GhPic/' . Plugin::VERSION,
-                CURLOPT_SSL_VERIFYPEER => true,
-            ]);
-            $body = curl_exec($ch);
-            $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            curl_close($ch);
-
-            return (200 === $code && is_string($body) && '' !== $body) ? $body : null;
-        }
-
-        $ctx  = stream_context_create(['http' => [
-            'timeout' => $timeout,
-            'header'  => "User-Agent: GhPic/" . Plugin::VERSION . "\r\n",
-        ]]);
-        $body = @file_get_contents($url, false, $ctx);
-        if (false === $body || '' === $body) {
-            return null;
-        }
-        if (isset($http_response_header) && preg_match('~HTTP/\S+\s+(\d{3})~', $http_response_header[0], $m)) {
-            return 200 === (int) $m[1] ? $body : null;
-        }
-
-        return $body;
-    }
-
-    /** 简单校验确实是图片，避免把错误页当图输出 */
     private function looksLikeImage(string $data, string $ext): bool
     {
         if ('svg' === $ext) {
