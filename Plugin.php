@@ -4,7 +4,7 @@
  *
  * @package GhPic
  * @author  麦狗 <3037924279@qq.com>
- * @version 1.2.4
+ * @version 1.3.0
  * @link    https://mdog.cn/
  */
 
@@ -293,6 +293,10 @@ HTML;
             }
         }
 
+        if (1 === (int) $tab) {
+            echo self::cdnPanel($saved);
+        }
+
         if (5 === (int) $tab) {
             echo self::updatePanel();
         }
@@ -439,6 +443,86 @@ HTML;
     }
 
     
+    private static function cdnPanel(array $saved): string
+    {
+        $opt = self::settings();
+        if (!$opt) {
+            return '';
+        }
+
+        $token = self::csrf('pages');
+        $note  = '';
+        $act   = (string) ($_GET['ghpic_pages'] ?? '');
+
+        if ('' !== $act) {
+            if (!hash_equals($token, (string) ($_GET['_'] ?? ''))) {
+                $note = '<p style="color:#cf222e;font-size:13px;">安全令牌校验失败，请刷新页面重试。</p>';
+            } elseif ('enable' === $act) {
+                $r = self::pagesEnable($opt);
+                $note = $r['ok']
+                    ? '<p style="font-size:13px;">Pages 已开通，首次构建大约要 1 分钟，稍后刷新本页看状态。</p>'
+                    : '<p style="color:#cf222e;font-size:13px;">开通失败（HTTP ' . (int) $r['code'] . '），Token 可能需要 pages 权限。</p>';
+            } elseif ('use' === $act) {
+                $st = self::pagesStatus($opt);
+                if ($st['exists'] && '' !== $st['url']) {
+                    self::saveSetting('cdn_mode', 'custom');
+                    self::saveSetting('cdn_prefix', $st['url']);
+                    $note = '<p style="font-size:13px;">已切换到 ' . htmlspecialchars($st['url'], ENT_QUOTES, 'UTF-8') . '，保存后新图走这个地址。</p>';
+                } else {
+                    $note = '<p style="color:#cf222e;font-size:13px;">Pages 还没开通，先点「开通 Pages」。</p>';
+                }
+            } elseif ('off' === $act) {
+                self::saveSetting('cdn_mode', 'jsdelivr');
+                $note = '<p style="font-size:13px;">已切回 jsDelivr。</p>';
+            }
+
+            $opt = self::settings();
+        }
+
+        $st    = self::pagesStatus($opt);
+        $base  = Helper::options()->adminUrl . 'options-plugin.php?config=GhPic&tab=1&_=' . rawurlencode($token);
+        $state = '未开通';
+
+        if ($st['exists']) {
+            $state = '已开通' . ('' !== $st['status'] ? '（' . $st['status'] . '）' : '');
+        }
+        if ('' !== $st['error']) {
+            $state = '读取失败：' . $st['error'];
+        }
+
+        $html = '<div style="margin:18px 0 0;padding:12px 14px;border:1px solid #d0d7de;border-radius:6px;font-size:13px;">'
+            . '<b>CDN 通道</b><br>'
+            . '<span style="color:#57606a;">当前：'
+            . ('custom' === (string) ($opt->cdn_mode ?? 'jsdelivr')
+                ? '自定义前缀 ' . htmlspecialchars((string) ($opt->cdn_prefix ?? ''), ENT_QUOTES, 'UTF-8')
+                : 'jsDelivr')
+            . '</span><br>'
+            . '<span style="color:#57606a;">GitHub Pages：' . htmlspecialchars($state, ENT_QUOTES, 'UTF-8')
+            . ('' !== $st['url'] ? '　<a href="' . htmlspecialchars($st['url'], ENT_QUOTES, 'UTF-8') . '" target="_blank" rel="noopener">'
+                . htmlspecialchars($st['url'], ENT_QUOTES, 'UTF-8') . '</a>' : '')
+            . '</span>'
+            . $note
+            . '<p style="margin:10px 0 0;">';
+
+        if (!$st['exists']) {
+            $html .= '<a class="btn" style="display:inline-block;padding:5px 14px;text-decoration:none;" href="'
+                . htmlspecialchars($base . '&ghpic_pages=enable', ENT_QUOTES, 'UTF-8') . '">开通 Pages</a>';
+        } else {
+            $html .= '<a class="btn" style="display:inline-block;padding:5px 14px;text-decoration:none;" href="'
+                . htmlspecialchars($base . '&ghpic_pages=use', ENT_QUOTES, 'UTF-8') . '">用 Pages 作为 CDN</a>';
+        }
+
+        $html .= ' <a class="btn" style="display:inline-block;padding:5px 14px;text-decoration:none;" href="'
+            . htmlspecialchars($base . '&ghpic_pages=off', ENT_QUOTES, 'UTF-8') . '">切回 jsDelivr</a>'
+            . '</p>'
+            . '<p style="margin:8px 0 0;color:#8b949e;font-size:12px;">'
+            . 'Pages 免费但有 1GB 仓库 / 100GB 月流量 / 10 次构建每小时的软限制；'
+            . '每次上传都会触发一次构建，图多时留意。</p>'
+            . '</div>';
+
+        return $html;
+    }
+
     private static function updatePanel(): string
     {
         $token  = self::csrf('update');
@@ -963,6 +1047,84 @@ HTML;
         }
 
         return implode(',', $out);
+    }
+
+    public static function pagesStatus($opt): array
+    {
+        [$owner, $repo] = self::repoOf($opt);
+        if ('' === $owner || '' === $repo) {
+            return ['exists' => false, 'url' => '', 'status' => '', 'error' => 'repo not set'];
+        }
+
+        $res = self::request(
+            'GET',
+            self::$api . '/repos/' . rawurlencode($owner) . '/' . rawurlencode($repo) . '/pages',
+            null,
+            $opt
+        );
+
+        if (404 === (int) $res['code']) {
+            return ['exists' => false, 'url' => '', 'status' => '', 'error' => ''];
+        }
+        if (!$res['ok'] || !is_array($res['data'])) {
+            return ['exists' => false, 'url' => '', 'status' => '', 'error' => 'HTTP ' . (int) $res['code']];
+        }
+
+        return [
+            'exists' => true,
+            'url'    => rtrim((string) ($res['data']['html_url'] ?? ''), '/'),
+            'status' => (string) ($res['data']['status'] ?? ''),
+            'error'  => '',
+        ];
+    }
+
+    public static function pagesEnable($opt): array
+    {
+        [$owner, $repo] = self::repoOf($opt);
+        if ('' === $owner || '' === $repo) {
+            return ['ok' => false, 'code' => 0];
+        }
+
+        $branch = trim((string) ($opt->branch ?? 'main')) ?: 'main';
+        $payload = json_encode([
+            'source' => ['branch' => $branch, 'path' => '/'],
+        ], JSON_UNESCAPED_SLASHES);
+
+        $res = self::request(
+            'POST',
+            self::$api . '/repos/' . rawurlencode($owner) . '/' . rawurlencode($repo) . '/pages',
+            $payload,
+            $opt
+        );
+
+        if (409 === (int) $res['code']) {
+            return ['ok' => true, 'code' => 409, 'exists' => true];
+        }
+
+        return ['ok' => $res['ok'], 'code' => (int) $res['code'], 'exists' => $res['ok']];
+    }
+
+    public static function saveSetting(string $key, string $value): bool
+    {
+        $cfg = self::backup();
+        if (!$cfg) {
+            try {
+                $current = Helper::options()->plugin('GhPic');
+                if ($current && method_exists($current, 'toArray')) {
+                    $cfg = (array) $current->toArray();
+                }
+            } catch (\Throwable $e) {
+            }
+        }
+        if (!$cfg) {
+            return false;
+        }
+
+        $cfg[$key] = $value;
+        self::saveBackup($cfg);
+        self::seedPluginOption($cfg);
+
+        return true;
     }
 
     public static function csrf(string $scope): string

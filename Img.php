@@ -56,6 +56,7 @@ class Img extends \Typecho\Widget
         [$owner, $repo] = Plugin::repoOf($opt);
         if ('' !== $owner && '' !== $repo) {
             $branch = trim((string) ($opt->branch ?? 'main')) ?: 'main';
+            $sources[] = 'https://' . strtolower($owner) . '.github.io/' . $repo . '/' . $path;
             $sources[] = 'https://raw.githubusercontent.com/' . $owner . '/' . $repo . '/'
                 . $branch . '/' . implode('/', array_map('rawurlencode', explode('/', $path)));
         }

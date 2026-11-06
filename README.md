@@ -40,6 +40,7 @@
 | 标签管理 | 给图片打标签，按标签筛选、分页浏览 |
 | 配置不丢 | 禁用、升级、重装插件，配置都还在 |
 | 插件更新 | 设置页直连 GitHub 仓库比对文件 sha，有新版一键更新 |
+| Pages 自动化 | 一键开通 GitHub Pages 并切过去当 CDN，失败自动回源 |
 | 仓库体检 | 扫出没被任何文章引用的图片，可勾选删除，释放仓库空间 |
 | 防刷防盗链 | 代理端点自带单 IP 限流与 Referer 白名单，都能关 |
 
@@ -201,6 +202,22 @@ https://cdn.jsdelivr.net/gh/你的用户名/image-repo@main/uploads/2026/11/2026
 > 检查更新只需要读公开仓库，Token 留空也能用；如果主机访问不了 `api.github.com`，这一页会直接提示「无法连接仓库」。
 
 ---
+
+## GitHub Pages 当 CDN
+
+jsDelivr 被墙或被重置时，可以把图片改由 GitHub Pages 提供：
+
+1. 进设置页 → **存储与 CDN**
+2. 面板上会显示 Pages 当前状态（未开通 / 已开通 / 构建中）
+3. 点「开通 Pages」，插件调 GitHub API 自动建站，等 1 分钟构建完成
+4. 点「用 Pages 作为 CDN」，自动把 CDN 前缀切到 https://用户名.github.io/仓库名
+5. 想换回来点「切回 jsDelivr」
+
+兜底链路也更新了：CDN → GitHub Pages → raw.githubusercontent.com → 本地缓存，
+任何一环挂了都会自动试下一个。
+
+注意 Pages 的软限制：仓库 1GB、月流量 100GB、**10 次构建/小时**。每次上传都会产生一次
+commit，图多时可能触发构建限流，此时新图会 404，旧图不受影响。
 
 ## 配置项
 
